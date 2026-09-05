@@ -1,0 +1,32 @@
+﻿venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.env
+.env.*
+
+.vscode/
+.idea/
+
+.DS_Store
+Thumbs.db
+
+*.log
+
+data/raw/
+
+# Large weather datasets
+data/processed/era5_observations_july2022.csv
+data/processed/era5_observations_june_july2022.csv
+data/processed/era5_observations_real.csv
+data/processed/gfs_forecast_real.csv
+
+# Intermediate/generated datasets
+data/processed/ml_predictions.csv
+data/processed/ml_predictions_improved.csv
+data/processed/forecast_comparison.csv
+
+

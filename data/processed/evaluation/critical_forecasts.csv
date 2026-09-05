@@ -1,0 +1,3 @@
+forecast_time,latitude,longitude,bust_score,forecast_bust,dominant_factor
+2022-07-28 06:00:00,15.0,74.0,0.8310642186927473,CRITICAL,TEMPERATURE
+2022-07-19 06:00:00,13.0,75.0,0.7538014577222976,CRITICAL,RAINFALL
