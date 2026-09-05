@@ -251,6 +251,30 @@ factor_order = [
 
 
 # ============================================================
+# FORECAST HORIZON METADATA
+# ============================================================
+# Prefer an explicit lead-time column when the forecasting pipeline
+# provides one. Otherwise, keep the dashboard date-based rather than
+# inventing a lead time that is not present in the source dataset.
+lead_time_candidates = [
+    "lead_time",
+    "lead_day",
+    "forecast_day",
+    "forecast_horizon",
+]
+lead_time_column = next(
+    (col for col in lead_time_candidates if col in df.columns),
+    None,
+)
+
+if lead_time_column is not None:
+    df[lead_time_column] = pd.to_numeric(
+        df[lead_time_column],
+        errors="coerce",
+    )
+
+
+# ============================================================
 # SIDEBAR
 # ============================================================
 
@@ -286,6 +310,34 @@ with st.sidebar:
         format_func=lambda x: x.strftime("%Y-%m-%d"),
     )
 
+    if lead_time_column is not None:
+        available_leads = sorted(
+            df[lead_time_column].dropna().unique()
+        )
+        available_leads = [
+            int(x) for x in available_leads if 1 <= x <= 10
+        ]
+
+        if available_leads:
+            selected_lead = st.selectbox(
+                "Forecast Horizon",
+                available_leads,
+                format_func=lambda x: f"Day {x}",
+            )
+        else:
+            selected_lead = None
+            st.caption(
+                "No Day 1–Day 10 lead-time records are available "
+                "in the selected dataset."
+            )
+    else:
+        selected_lead = None
+        st.caption(
+            "Lead-time metadata is not present in this dataset. "
+            "The dashboard therefore uses forecast date for analysis "
+            "and does not fabricate Day 1–Day 10 labels."
+        )
+
     st.markdown("---")
 
     st.markdown("### Risk Levels")
@@ -318,6 +370,11 @@ with st.sidebar:
 daily_df = df[
     df["forecast_date"] == selected_date
 ].copy()
+
+if selected_lead is not None:
+    daily_df = daily_df[
+        daily_df[lead_time_column] == selected_lead
+    ].copy()
 
 if daily_df.empty:
     st.warning(
@@ -373,6 +430,20 @@ st.write(
     "where the forecast may significantly deviate."
 )
 
+if selected_lead is not None:
+    st.info(
+        f"Forecast horizon selected: **Day {selected_lead}**. "
+        "Regional risk and confidence indicators below correspond "
+        "to this lead time."
+    )
+else:
+    st.info(
+        "Forecast horizon: **date-based analysis**. "
+        "The current source data does not contain explicit lead-time "
+        "metadata, so VARUNA keeps the result traceable to the actual "
+        "forecast date."
+    )
+
 st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
 
@@ -397,7 +468,9 @@ normal_count = int(risk_counts["NORMAL"])
 
 average_score = daily_df["bust_score"].mean()
 
-c1, c2, c3, c4, c5 = st.columns(5)
+confidence_score = max(0.0, min(100.0, (1.0 - average_score) * 100.0))
+
+c1, c2, c3, c4, c5, c6 = st.columns(6)
 
 with c1:
     st.metric("Forecast Points", total_points)
@@ -413,6 +486,9 @@ with c4:
 
 with c5:
     st.metric("Average Bust Score", f"{average_score:.3f}")
+
+with c6:
+    st.metric("Confidence Indicator", f"{confidence_score:.1f}%")
 
 
 # ============================================================
@@ -604,6 +680,69 @@ st.plotly_chart(
     fig_trend,
     use_container_width=True,
 )
+
+
+# ============================================================
+# HISTORICAL ERROR & CORRECTION ANALYSIS
+# ============================================================
+
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+
+st.header("Historical Forecast Error Analysis")
+st.caption(
+    "VARUNA summarizes correction magnitude across the available "
+    "historical forecast records to show where the ML layer changes the original forecast."
+)
+
+correction_map = {
+    "Temperature": "abs_temperature_correction",
+    "Pressure": "abs_pressure_correction",
+    "Wind Speed": "abs_wind_correction",
+    "Rainfall": "abs_rainfall_correction",
+}
+
+history_rows = []
+for label, column in correction_map.items():
+    if column in df.columns:
+        values = pd.to_numeric(df[column], errors="coerce").dropna()
+        if not values.empty:
+            history_rows.append({
+                "Weather Variable": label,
+                "Mean Absolute Correction": values.mean(),
+                "Maximum Correction": values.max(),
+            })
+
+history_df = pd.DataFrame(history_rows)
+
+if not history_df.empty:
+    h1, h2 = st.columns(2)
+
+    with h1:
+        fig_history = px.bar(
+            history_df,
+            x="Weather Variable",
+            y="Mean Absolute Correction",
+            text_auto=".3f",
+            title="Mean Absolute Forecast Correction",
+        )
+        fig_history.update_layout(height=380)
+        st.plotly_chart(fig_history, use_container_width=True)
+
+    with h2:
+        st.dataframe(
+            history_df.round(4),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.success(
+        "Historical correction behaviour is included as an explicit "
+        "explainability view, alongside the regional bust-risk results."
+    )
+else:
+    st.warning(
+        "Historical correction columns are not available in the current dataset."
+    )
 
 
 # ============================================================
@@ -876,6 +1015,9 @@ with st.expander("View Forecast Dataset"):
         "forecast_bust",
         "dominant_factor",
     ]
+
+    if lead_time_column is not None and lead_time_column not in display_columns:
+        display_columns.insert(1, lead_time_column)
 
     st.dataframe(
         daily_df[display_columns],
