@@ -1,51 +1,263 @@
-import requests
 import os
+import requests
 from datetime import date, timedelta
 
+
+# =========================================================
+# CONFIGURATION
+# =========================================================
+
 OUTPUT_DIR = r"data\raw\ncmrwf_forecast"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-start_date = date(2022, 7, 1)
-end_date = date(2022, 7, 31)
+START_DATE = date(2022, 7, 1)
+END_DATE = date(2022, 7, 31)
 
-current = start_date
+FORECAST_HOURS = [
+    6,
+    24,
+    48,
+    72,
+    96,
+    120,
+    144,
+    168,
+    192,
+    216,
+    240
+]
 
-while current <= end_date:
+os.makedirs(
+    OUTPUT_DIR,
+    exist_ok=True
+)
 
-    date_string = current.strftime("%Y%m%d")
 
-    filename = f"gfs_3_{date_string}_0000_006.grb2"
+# =========================================================
+# DOWNLOAD ONE GFS FILE
+# =========================================================
 
-    url = (
-        f"https://www.ncei.noaa.gov/thredds/fileServer/"
-        f"model-gfs-004-files/202207/{date_string}/"
-        f"{filename}"
+def download_gfs(
+    target_date,
+    forecast_hour
+):
+
+    date_string = target_date.strftime(
+        "%Y%m%d"
     )
 
-    output_path = os.path.join(OUTPUT_DIR, filename)
+    hour_string = f"{forecast_hour:03d}"
 
-    print("\nDownloading:", filename)
-    print("URL:", url)
+    filename = (
+        f"gfs_3_{date_string}_0000_"
+        f"{hour_string}.grb2"
+    )
+
+    url = (
+        f"https://www.ncei.noaa.gov/thredds/"
+        f"fileServer/model-gfs-004-files/"
+        f"202207/{date_string}/{filename}"
+    )
+
+    output_file = os.path.join(
+        OUTPUT_DIR,
+        filename
+    )
+
+    print(
+        f"\nDownloading: {filename}"
+    )
+
+    print(
+        f"Forecast lead: {forecast_hour} hours"
+    )
+
+    print(
+        f"URL: {url}"
+    )
+
+    if os.path.exists(output_file):
+
+        size = os.path.getsize(
+            output_file
+        )
+
+        if size > 1_000_000:
+
+            print(
+                "Already exists. Skipping."
+            )
+
+            return True
+
+        print(
+            "Existing file is too small. "
+            "Removing it."
+        )
+
+        os.remove(
+            output_file
+        )
 
     try:
+
         response = requests.get(
             url,
-            headers={"User-Agent": "Mozilla/5.0"},
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            },
             timeout=300
         )
 
         response.raise_for_status()
 
-        with open(output_path, "wb") as f:
-            f.write(response.content)
+        with open(
+            output_file,
+            "wb"
+        ) as f:
 
-        print("Downloaded:", filename)
-        print("Size:", len(response.content))
+            f.write(
+                response.content
+            )
+
+        size = len(
+            response.content
+        )
+
+        print(
+            "Downloaded successfully:"
+            f" {size / 1024 / 1024:.2f} MB"
+        )
+
+        return True
 
     except Exception as e:
-        print("FAILED:", filename)
-        print("Error:", e)
 
-    current += timedelta(days=1)
+        print(
+            "Download failed."
+        )
 
-print("\nJuly 2022 download completed.")
+        print(
+            "Error:",
+            e
+        )
+
+        if os.path.exists(
+            output_file
+        ):
+
+            os.remove(
+                output_file
+            )
+
+        return False
+
+
+# =========================================================
+# DOWNLOAD JULY 2022
+# =========================================================
+
+print("=" * 65)
+print("GFS JULY 2022 - DAY 1 TO DAY 10 DOWNLOAD")
+print("=" * 65)
+
+current_date = START_DATE
+
+successful = 0
+failed = 0
+
+total_files = (
+    (END_DATE - START_DATE).days + 1
+) * len(
+    FORECAST_HOURS
+)
+
+processed = 0
+
+
+while current_date <= END_DATE:
+
+    for forecast_hour in FORECAST_HOURS:
+
+        processed += 1
+
+        print(
+            f"\n[{processed}/{total_files}]"
+        )
+
+        if download_gfs(
+            current_date,
+            forecast_hour
+        ):
+
+            successful += 1
+
+        else:
+
+            failed += 1
+
+    current_date += timedelta(
+        days=1
+    )
+
+
+# =========================================================
+# SUMMARY
+# =========================================================
+
+print("\n")
+print("=" * 65)
+print("JULY DOWNLOAD SUMMARY")
+print("=" * 65)
+
+print(
+    "Successful:",
+    successful
+)
+
+print(
+    "Failed:",
+    failed
+)
+
+print(
+    "Total attempted:",
+    total_files
+)
+
+print(
+    "\nRequired forecast hours:"
+)
+
+print(
+    FORECAST_HOURS
+)
+
+print(
+    "\nGFS files currently present:"
+)
+
+files = sorted(
+    f
+    for f in os.listdir(
+        OUTPUT_DIR
+    )
+    if f.endswith(".grb2")
+)
+
+for filename in files:
+
+    size = os.path.getsize(
+        os.path.join(
+            OUTPUT_DIR,
+            filename
+        )
+    )
+
+    print(
+        f"{filename} - "
+        f"{size / 1024 / 1024:.2f} MB"
+    )
+
+print(
+    "\nJuly GFS download completed."
+)

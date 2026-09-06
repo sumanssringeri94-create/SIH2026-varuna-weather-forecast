@@ -397,7 +397,9 @@ normal_count = int(risk_counts["NORMAL"])
 
 average_score = daily_df["bust_score"].mean()
 
-c1, c2, c3, c4, c5 = st.columns(5)
+confidence_score = max(0.0, min(100.0, (1.0 - average_score) * 100.0))
+
+c1, c2, c3, c4, c5, c6 = st.columns(6)
 
 with c1:
     st.metric("Forecast Points", total_points)
@@ -413,6 +415,9 @@ with c4:
 
 with c5:
     st.metric("Average Bust Score", f"{average_score:.3f}")
+
+with c6:
+    st.metric("Confidence Indicator", f"{confidence_score:.1f}%")
 
 
 # ============================================================
@@ -604,6 +609,69 @@ st.plotly_chart(
     fig_trend,
     use_container_width=True,
 )
+
+
+# ============================================================
+# HISTORICAL ERROR & CORRECTION ANALYSIS
+# ============================================================
+
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+
+st.header("Historical Forecast Error Analysis")
+st.caption(
+    "VARUNA summarizes correction magnitude across the available "
+    "historical forecast records to show where the ML layer changes the original forecast."
+)
+
+correction_map = {
+    "Temperature": "abs_temperature_correction",
+    "Pressure": "abs_pressure_correction",
+    "Wind Speed": "abs_wind_correction",
+    "Rainfall": "abs_rainfall_correction",
+}
+
+history_rows = []
+for label, column in correction_map.items():
+    if column in df.columns:
+        values = pd.to_numeric(df[column], errors="coerce").dropna()
+        if not values.empty:
+            history_rows.append({
+                "Weather Variable": label,
+                "Mean Absolute Correction": values.mean(),
+                "Maximum Correction": values.max(),
+            })
+
+history_df = pd.DataFrame(history_rows)
+
+if not history_df.empty:
+    h1, h2 = st.columns(2)
+
+    with h1:
+        fig_history = px.bar(
+            history_df,
+            x="Weather Variable",
+            y="Mean Absolute Correction",
+            text_auto=".3f",
+            title="Mean Absolute Forecast Correction",
+        )
+        fig_history.update_layout(height=380)
+        st.plotly_chart(fig_history, use_container_width=True)
+
+    with h2:
+        st.dataframe(
+            history_df.round(4),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.success(
+        "Historical correction behaviour is included as an explicit "
+        "explainability view, alongside the regional bust-risk results."
+    )
+else:
+    st.warning(
+        "Historical correction columns are not available in the current dataset."
+    )
 
 
 # ============================================================

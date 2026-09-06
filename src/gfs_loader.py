@@ -1,306 +1,714 @@
 import os
 import glob
-import eccodes
 import pandas as pd
 import numpy as np
+import eccodes
 
 
 # =========================================================
-# Paths
+# VARUNA - GFS FORECAST LOADER
+# Day 1 to Day 10 capable
+# =========================================================
+
+
+# =========================================================
+# CONFIGURATION
 # =========================================================
 
 INPUT_DIR = r"data\raw\ncmrwf_forecast"
-OUTPUT_FILE = r"data\processed\gfs_forecast_real.csv"
+
+OUTPUT_FILE = (
+    r"data\processed\gfs_forecast_real.csv"
+)
 
 
 # =========================================================
-# Target region
+# SUPPORTED FORECAST RANGE
 # =========================================================
 
-MIN_LAT = 11
-MAX_LAT = 18
-
-MIN_LON = 74
-MAX_LON = 78
-
-
-print("Reading GFS forecasts...")
+MAX_FORECAST_HOUR = 240
 
 
 # =========================================================
-# Find all historical GFS files
-# June + July 2022
+# VARIABLES
 # =========================================================
+
+VARIABLES = {
+
+    "temperature": [
+        "2t",
+        "TMP"
+    ],
+
+    "pressure": [
+        "sp",
+        "PRES"
+    ],
+
+    "wind_u": [
+        "10u",
+        "UGRD"
+    ],
+
+    "wind_v": [
+        "10v",
+        "VGRD"
+    ],
+
+    "precipitation": [
+        "prate",
+        "PRATE"
+    ]
+}
+
+
+# =========================================================
+# HEADER
+# =========================================================
+
+print("=" * 70)
+print("VARUNA - GFS FORECAST LOADER")
+print("DAY 1 - DAY 10 FORECAST SUPPORT")
+print("=" * 70)
+
+
+# =========================================================
+# FIND GRIB FILES
+# =========================================================
+
+print("\nSearching for GFS GRIB files...")
 
 files = sorted(
     glob.glob(
         os.path.join(
             INPUT_DIR,
-            "gfs_3_2022*_0000_006.grb2"
+            "*.grb2"
         )
     )
 )
 
-print("\nGFS files found:", len(files))
+print("Files found:", len(files))
+
 
 if len(files) == 0:
-    raise RuntimeError(
-        "No GFS files found!"
+
+    raise FileNotFoundError(
+        "\nNo GFS .grb2 files found in:\n"
+        + INPUT_DIR
+        + "\n\nPlease download the required forecast files first."
     )
 
 
 # =========================================================
-# Read GRIB message
+# FORECAST DAY FUNCTION
 # =========================================================
 
-def read_message(handle):
+def get_forecast_day(forecast_hour):
 
-    values = np.array(
-        eccodes.codes_get_values(handle)
+    """
+    Convert forecast lead hour to SIH forecast day.
+
+    001-024  -> Day 1
+    025-048  -> Day 2
+    049-072  -> Day 3
+    073-096  -> Day 4
+    097-120  -> Day 5
+    121-144  -> Day 6
+    145-168  -> Day 7
+    169-192  -> Day 8
+    193-216  -> Day 9
+    217-240  -> Day 10
+    """
+
+    forecast_hour = int(
+        forecast_hour
     )
+
+    if forecast_hour < 1:
+
+        return 0
+
+    forecast_day = int(
+        np.ceil(
+            forecast_hour / 24
+        )
+    )
+
+    return forecast_day
+
+
+# =========================================================
+# FORECAST DAY LABEL
+# =========================================================
+
+def get_forecast_day_label(
+    forecast_day
+):
+
+    if forecast_day <= 0:
+
+        return "UNKNOWN"
+
+    if forecast_day > 10:
+
+        return "BEYOND_DAY_10"
+
+    return (
+        f"DAY_{forecast_day}"
+    )
+
+
+# =========================================================
+# READ FIRST GRIB MESSAGE
+# =========================================================
+
+def read_first_message_metadata(
+    filename
+):
+
+    handle = None
 
     try:
 
-        latitudes = np.array(
+        with open(
+            filename,
+            "rb"
+        ) as f:
+
+            handle = (
+                eccodes.codes_grib_new_from_file(
+                    f
+                )
+            )
+
+            if handle is None:
+
+                return None
+
+
+            # -------------------------------------------------
+            # Initialization date
+            # -------------------------------------------------
+
+            data_date = eccodes.codes_get(
+                handle,
+                "dataDate"
+            )
+
+
+            # -------------------------------------------------
+            # Initialization time
+            # -------------------------------------------------
+
+            data_time = eccodes.codes_get(
+                handle,
+                "dataTime"
+            )
+
+            data_time = int(
+                data_time
+            )
+
+
+            hour = data_time // 100
+            minute = data_time % 100
+
+
+            # -------------------------------------------------
+            # Base time
+            # -------------------------------------------------
+
+            base_time = (
+                pd.Timestamp(
+                    str(data_date)
+                )
+                + pd.Timedelta(
+                    hours=hour,
+                    minutes=minute
+                )
+            )
+
+
+            # -------------------------------------------------
+            # Forecast hour
+            # -------------------------------------------------
+
+            forecast_hour = eccodes.codes_get(
+                handle,
+                "forecastTime"
+            )
+
+            forecast_hour = int(
+                forecast_hour
+            )
+
+
+            # -------------------------------------------------
+            # Forecast time
+            # -------------------------------------------------
+
+            forecast_time = (
+                base_time
+                + pd.Timedelta(
+                    hours=forecast_hour
+                )
+            )
+
+
+            # -------------------------------------------------
+            # Forecast day
+            # -------------------------------------------------
+
+            forecast_day = (
+                get_forecast_day(
+                    forecast_hour
+                )
+            )
+
+
+            return {
+
+                "forecast_initialization":
+                    base_time,
+
+                "forecast_hour":
+                    forecast_hour,
+
+                "forecast_day":
+                    forecast_day,
+
+                "forecast_day_label":
+                    get_forecast_day_label(
+                        forecast_day
+                    ),
+
+                "forecast_time":
+                    forecast_time
+            }
+
+
+    except Exception as e:
+
+        print(
+            "Metadata error:",
+            e
+        )
+
+        return None
+
+
+    finally:
+
+        if handle is not None:
+
+            try:
+
+                eccodes.codes_release(
+                    handle
+                )
+
+            except Exception:
+
+                pass
+
+
+# =========================================================
+# FIND VARIABLE MESSAGE
+# =========================================================
+
+def find_variable_message(
+    filename,
+    variable_names
+):
+
+    try:
+
+        with open(
+            filename,
+            "rb"
+        ) as f:
+
+            while True:
+
+                handle = None
+
+                try:
+
+                    handle = (
+                        eccodes.codes_grib_new_from_file(
+                            f
+                        )
+                    )
+
+                except Exception:
+
+                    break
+
+
+                if handle is None:
+
+                    break
+
+
+                try:
+
+                    short_name = (
+                        str(
+                            eccodes.codes_get(
+                                handle,
+                                "shortName"
+                            )
+                        )
+                    )
+
+                    name = (
+                        str(
+                            eccodes.codes_get(
+                                handle,
+                                "name"
+                            )
+                        )
+                    )
+
+
+                    for variable in variable_names:
+
+                        if (
+                            short_name.lower()
+                            == variable.lower()
+                            or
+                            name.lower()
+                            == variable.lower()
+                        ):
+
+                            return handle
+
+
+                except Exception:
+
+                    pass
+
+
+                try:
+
+                    eccodes.codes_release(
+                        handle
+                    )
+
+                except Exception:
+
+                    pass
+
+
+    except Exception as e:
+
+        print(
+            "Variable search error:",
+            e
+        )
+
+
+    return None
+
+
+# =========================================================
+# READ GRIB VARIABLE
+# =========================================================
+
+def read_grib_variable(
+    filename,
+    variable_names
+):
+
+    handle = find_variable_message(
+        filename,
+        variable_names
+    )
+
+
+    if handle is None:
+
+        return None
+
+
+    try:
+
+        latitudes = (
             eccodes.codes_get_array(
                 handle,
                 "latitudes"
             )
         )
 
-        longitudes = np.array(
+        longitudes = (
             eccodes.codes_get_array(
                 handle,
                 "longitudes"
             )
         )
 
-    except Exception:
-
-        # Build coordinates for regular latitude/longitude grid
-
-        ni = eccodes.codes_get(
-            handle,
-            "Ni"
+        values = (
+            eccodes.codes_get_array(
+                handle,
+                "values"
+            )
         )
 
-        nj = eccodes.codes_get(
-            handle,
-            "Nj"
+
+        return {
+
+            "latitude":
+                latitudes,
+
+            "longitude":
+                longitudes,
+
+            "values":
+                values
+        }
+
+
+    except Exception as e:
+
+        print(
+            "Reading variable failed:",
+            e
         )
 
-        lat1 = eccodes.codes_get(
-            handle,
-            "latitudeOfFirstGridPointInDegrees"
-        )
+        return None
 
-        lat2 = eccodes.codes_get(
-            handle,
-            "latitudeOfLastGridPointInDegrees"
-        )
 
-        lon1 = eccodes.codes_get(
-            handle,
-            "longitudeOfFirstGridPointInDegrees"
-        )
+    finally:
 
-        lon2 = eccodes.codes_get(
-            handle,
-            "longitudeOfLastGridPointInDegrees"
-        )
+        try:
 
-        latitudes = np.linspace(
-            lat1,
-            lat2,
-            nj
-        )
+            eccodes.codes_release(
+                handle
+            )
 
-        longitudes = np.linspace(
-            lon1,
-            lon2,
-            ni
-        )
+        except Exception:
 
-        longitudes, latitudes = np.meshgrid(
-            longitudes,
-            latitudes
-        )
-
-        latitudes = latitudes.flatten()
-        longitudes = longitudes.flatten()
-
-    return (
-        latitudes,
-        longitudes,
-        values
-    )
+            pass
 
 
 # =========================================================
-# Process one GFS file
+# PROCESS ONE GFS FILE
 # =========================================================
 
-def process_file(filename):
+def process_gfs_file(
+    filename
+):
 
     print(
         "\nProcessing:",
-        os.path.basename(filename)
-    )
-
-    required = {
-        "sp": None,
-        "2t": None,
-        "10u": None,
-        "10v": None,
-        "prate": None
-    }
-
-    handles = []
-
-    with open(
-        filename,
-        "rb"
-    ) as f:
-
-        while True:
-
-            handle = eccodes.codes_grib_new_from_file(
-                f
-            )
-
-            if handle is None:
-                break
-
-            handles.append(handle)
-
-            try:
-
-                short_name = eccodes.codes_get(
-                    handle,
-                    "shortName"
-                )
-
-                if short_name in required:
-
-                    # Keep only surface-level / required message
-
-                    if required[short_name] is None:
-
-                        required[short_name] = handle
-
-                    else:
-
-                        eccodes.codes_release(
-                            handle
-                        )
-
-                else:
-
-                    eccodes.codes_release(
-                        handle
-                    )
-
-            except Exception:
-
-                eccodes.codes_release(
-                    handle
-                )
-
-    missing = [
-        key
-        for key, value in required.items()
-        if value is None
-    ]
-
-    if missing:
-
-        for handle in required.values():
-
-            if handle is not None:
-
-                eccodes.codes_release(
-                    handle
-                )
-
-        raise RuntimeError(
-            f"Missing variables in {filename}: {missing}"
-        )
-
-
-    # -----------------------------------------------------
-    # Forecast time
-    # -----------------------------------------------------
-
-    first_handle = required["sp"]
-
-    data_date = eccodes.codes_get(
-        first_handle,
-        "dataDate"
-    )
-
-    data_time = eccodes.codes_get(
-        first_handle,
-        "dataTime"
-    )
-
-    forecast_hour = eccodes.codes_get(
-        first_handle,
-        "forecastTime"
-    )
-
-    base_time = pd.to_datetime(
-        str(data_date)
-        + str(data_time).zfill(4),
-        format="%Y%m%d%H%M"
-    )
-
-    forecast_time = (
-        base_time
-        + pd.Timedelta(
-            hours=forecast_hour
+        os.path.basename(
+            filename
         )
     )
 
 
     # -----------------------------------------------------
-    # Extract variables
+    # Metadata
     # -----------------------------------------------------
 
-    lat_sp, lon_sp, sp = read_message(
-        required["sp"]
+    metadata = (
+        read_first_message_metadata(
+            filename
+        )
     )
 
-    lat_t, lon_t, temperature = read_message(
-        required["2t"]
+
+    if metadata is None:
+
+        print(
+            "Could not read metadata."
+        )
+
+        return None
+
+
+    forecast_hour = (
+        metadata[
+            "forecast_hour"
+        ]
     )
 
-    lat_u, lon_u, u10 = read_message(
-        required["10u"]
-    )
 
-    lat_v, lon_v, v10 = read_message(
-        required["10v"]
-    )
-
-    lat_p, lon_p, prate = read_message(
-        required["prate"]
+    forecast_day = (
+        metadata[
+            "forecast_day"
+        ]
     )
 
 
     # -----------------------------------------------------
-    # Convert Kelvin to Celsius
+    # Ignore files beyond Day 10
+    # -----------------------------------------------------
+
+    if (
+        forecast_hour < 1
+        or
+        forecast_hour > MAX_FORECAST_HOUR
+    ):
+
+        print(
+            "Skipping forecast hour:",
+            forecast_hour
+        )
+
+        return None
+
+
+    print(
+        "Initialization:",
+        metadata[
+            "forecast_initialization"
+        ]
+    )
+
+    print(
+        "Forecast hour:",
+        forecast_hour
+    )
+
+    print(
+        "Forecast day:",
+        forecast_day
+    )
+
+    print(
+        "Forecast label:",
+        metadata[
+            "forecast_day_label"
+        ]
+    )
+
+    print(
+        "Forecast time:",
+        metadata[
+            "forecast_time"
+        ]
+    )
+
+
+    # -----------------------------------------------------
+    # Read variables
     # -----------------------------------------------------
 
     temperature = (
-        temperature - 273.15
+        read_grib_variable(
+            filename,
+            VARIABLES[
+                "temperature"
+            ]
+        )
+    )
+
+
+    pressure = (
+        read_grib_variable(
+            filename,
+            VARIABLES[
+                "pressure"
+            ]
+        )
+    )
+
+
+    wind_u = (
+        read_grib_variable(
+            filename,
+            VARIABLES[
+                "wind_u"
+            ]
+        )
+    )
+
+
+    wind_v = (
+        read_grib_variable(
+            filename,
+            VARIABLES[
+                "wind_v"
+            ]
+        )
+    )
+
+
+    precipitation = (
+        read_grib_variable(
+            filename,
+            VARIABLES[
+                "precipitation"
+            ]
+        )
     )
 
 
     # -----------------------------------------------------
-    # Pressure Pa -> hPa
+    # Validate variables
     # -----------------------------------------------------
 
-    sp = sp / 100.0
+    if temperature is None:
+
+        print(
+            "Temperature not found."
+        )
+
+        return None
+
+
+    if pressure is None:
+
+        print(
+            "Pressure not found."
+        )
+
+        return None
+
+
+    if wind_u is None:
+
+        print(
+            "U-wind not found."
+        )
+
+        return None
+
+
+    if wind_v is None:
+
+        print(
+            "V-wind not found."
+        )
+
+        return None
+
+
+    if precipitation is None:
+
+        print(
+            "Precipitation not found."
+        )
+
+        return None
+
+
+    # -----------------------------------------------------
+    # Coordinates
+    # -----------------------------------------------------
+
+    latitudes = (
+        temperature[
+            "latitude"
+        ]
+    )
+
+    longitudes = (
+        temperature[
+            "longitude"
+        ]
+    )
 
 
     # -----------------------------------------------------
@@ -308,7 +716,13 @@ def process_file(filename):
     # -----------------------------------------------------
 
     wind_speed = np.sqrt(
-        u10 ** 2 + v10 ** 2
+
+        wind_u["values"] ** 2
+
+        +
+
+        wind_v["values"] ** 2
+
     )
 
 
@@ -316,220 +730,495 @@ def process_file(filename):
     # Create dataframe
     # -----------------------------------------------------
 
-    df = pd.DataFrame({
+    data = pd.DataFrame({
 
-        "forecast_time": forecast_time,
+        "forecast_initialization":
+            metadata[
+                "forecast_initialization"
+            ],
 
-        "latitude": lat_sp,
+        "forecast_hour":
+            metadata[
+                "forecast_hour"
+            ],
 
-        "longitude": lon_sp,
+        "forecast_day":
+            metadata[
+                "forecast_day"
+            ],
 
-        "forecast_temperature": temperature,
+        "forecast_day_label":
+            metadata[
+                "forecast_day_label"
+            ],
 
-        "forecast_pressure": sp,
+        "forecast_time":
+            metadata[
+                "forecast_time"
+            ],
 
-        "forecast_wind_speed": wind_speed,
+        "latitude":
+            latitudes,
 
-        "forecast_precip_rate": prate
+        "longitude":
+            longitudes,
+
+        "forecast_temperature":
+            temperature[
+                "values"
+            ],
+
+        "forecast_pressure":
+            pressure[
+                "values"
+            ],
+
+        "forecast_wind_speed":
+            wind_speed,
+
+        "forecast_precip_rate":
+            precipitation[
+                "values"
+            ]
+
     })
 
 
-    # -----------------------------------------------------
-    # Filter target region
-    # -----------------------------------------------------
-
-    df = df[
-        (df["latitude"] >= MIN_LAT)
-        & (df["latitude"] <= MAX_LAT)
-        & (df["longitude"] >= MIN_LON)
-        & (df["longitude"] <= MAX_LON)
-    ]
-
-
-    # -----------------------------------------------------
-    # Cleanup handles
-    # -----------------------------------------------------
-
-    for handle in required.values():
-
-        eccodes.codes_release(
-            handle
-        )
-
-
-    print(
-        "Grid points inside target region:",
-        len(df)
-    )
-
-    return df
+    return data
 
 
 # =========================================================
-# Process all files
+# PROCESS ALL FILES
 # =========================================================
 
 all_data = []
 
-for filename in files:
+
+print("\n")
+print("=" * 70)
+print("PROCESSING GFS FILES")
+print("=" * 70)
+
+
+for index, filename in enumerate(
+    files,
+    start=1
+):
+
+    print(
+        f"\n[{index}/{len(files)}]"
+    )
+
 
     try:
 
-        df = process_file(
+        result = process_gfs_file(
             filename
         )
 
-        all_data.append(
-            df
-        )
+
+        if result is not None:
+
+            all_data.append(
+                result
+            )
+
+
+            print(
+                "Records:",
+                len(result)
+            )
+
 
     except Exception as e:
 
         print(
-            "ERROR processing:",
-            filename
+            "FAILED:",
+            os.path.basename(
+                filename
+            )
         )
 
-        print(e)
+        print(
+            "Error:",
+            e
+        )
 
 
 # =========================================================
-# Combine datasets
+# CHECK DATA
 # =========================================================
 
 if len(all_data) == 0:
 
     raise RuntimeError(
-        "No GFS data was successfully processed!"
+        "\nNo valid GFS forecast data could be processed."
     )
 
 
-gfs = pd.concat(
+# =========================================================
+# COMBINE
+# =========================================================
+
+print("\n")
+print("=" * 70)
+print("COMBINING GFS DATA")
+print("=" * 70)
+
+
+df = pd.concat(
     all_data,
     ignore_index=True
 )
 
 
 # =========================================================
-# Sort
+# SORT
 # =========================================================
 
-gfs = gfs.sort_values(
+df = df.sort_values(
+
     [
-        "forecast_time",
+        "forecast_initialization",
+        "forecast_hour",
         "latitude",
         "longitude"
     ]
+
 ).reset_index(
     drop=True
 )
 
 
 # =========================================================
-# Remove duplicates
+# REMOVE DUPLICATES
 # =========================================================
 
-gfs = gfs.drop_duplicates(
+df = df.drop_duplicates(
+
     subset=[
-        "forecast_time",
+
+        "forecast_initialization",
+
+        "forecast_hour",
+
         "latitude",
+
         "longitude"
+
     ]
+
 ).reset_index(
     drop=True
 )
 
 
 # =========================================================
-# Display results
+# SAVE
+# =========================================================
+
+os.makedirs(
+
+    os.path.dirname(
+        OUTPUT_FILE
+    ),
+
+    exist_ok=True
+)
+
+
+df.to_csv(
+
+    OUTPUT_FILE,
+
+    index=False
+)
+
+
+# =========================================================
+# SUMMARY
 # =========================================================
 
 print("\n")
-print("=" * 60)
-print("GFS FORECAST DATASET")
-print("=" * 60)
+print("=" * 70)
+print("GFS LOADING COMPLETED")
+print("=" * 70)
+
 
 print(
-    "\nNumber of files processed:",
-    len(all_data)
+    "\nTotal records:",
+    len(df)
+)
+
+
+print(
+    "\nColumns:"
 )
 
 print(
-    "\nNumber of records:",
-    len(gfs)
+    list(
+        df.columns
+    )
+)
+
+
+# =========================================================
+# AVAILABLE FORECAST HOURS
+# =========================================================
+
+available_hours = sorted(
+
+    df[
+        "forecast_hour"
+    ]
+    .drop_duplicates()
+    .tolist()
+
+)
+
+
+print(
+    "\nAvailable forecast hours:"
 )
 
 print(
-    "\nNumber of forecast times:",
-    gfs["forecast_time"].nunique()
+    available_hours
 )
+
+
+# =========================================================
+# AVAILABLE FORECAST DAYS
+# =========================================================
+
+available_days = sorted(
+
+    df[
+        "forecast_day"
+    ]
+    .drop_duplicates()
+    .tolist()
+
+)
+
+
+print(
+    "\nAvailable forecast days:"
+)
+
+print(
+    available_days
+)
+
+
+# =========================================================
+# DAY 1 TO DAY 10 STATUS
+# =========================================================
+
+print("\n")
+print("=" * 70)
+print("DAY 1 - DAY 10 AVAILABILITY")
+print("=" * 70)
+
+
+for day in range(
+    1,
+    11
+):
+
+    count = len(
+        df[
+            df[
+                "forecast_day"
+            ]
+            == day
+        ]
+    )
+
+
+    if count > 0:
+
+        hours = sorted(
+
+            df[
+                df[
+                    "forecast_day"
+                ]
+                == day
+            ][
+                "forecast_hour"
+            ]
+            .drop_duplicates()
+            .tolist()
+
+        )
+
+        print(
+            f"Day {day:2d}: AVAILABLE | "
+            f"Hours: {hours} | "
+            f"Records: {count}"
+        )
+
+    else:
+
+        print(
+            f"Day {day:2d}: NOT AVAILABLE"
+        )
+
+
+# =========================================================
+# FORECAST TIME RANGE
+# =========================================================
 
 print(
     "\nForecast time range:"
 )
 
 print(
-    gfs["forecast_time"].min(),
+
+    df[
+        "forecast_time"
+    ].min(),
+
     "to",
-    gfs["forecast_time"].max()
+
+    df[
+        "forecast_time"
+    ].max()
+
+)
+
+
+# =========================================================
+# INITIALIZATION RANGE
+# =========================================================
+
+print(
+    "\nInitialization range:"
 )
 
 print(
-    "\nLatitude range:"
-)
 
-print(
-    gfs["latitude"].min(),
+    df[
+        "forecast_initialization"
+    ].min(),
+
     "to",
-    gfs["latitude"].max()
+
+    df[
+        "forecast_initialization"
+    ].max()
+
 )
 
-print(
-    "\nLongitude range:"
-)
 
-print(
-    gfs["longitude"].min(),
-    "to",
-    gfs["longitude"].max()
-)
+# =========================================================
+# MISSING VALUES
+# =========================================================
 
 print(
     "\nMissing values:"
 )
 
 print(
-    gfs.isnull().sum()
+    df.isna().sum()
 )
 
-print(
-    "\nFirst 10 records:"
-)
 
-print(
-    gfs.head(10).to_string(
-        index=False
+# =========================================================
+# DAY-WISE RECORD COUNTS
+# =========================================================
+
+print("\n")
+print("=" * 70)
+print("DAY-WISE RECORD COUNTS")
+print("=" * 70)
+
+
+day_counts = (
+
+    df.groupby(
+        "forecast_day"
     )
+    .size()
+    .sort_index()
+
 )
 
-
-# =========================================================
-# Save
-# =========================================================
-
-gfs.to_csv(
-    OUTPUT_FILE,
-    index=False
-)
 
 print(
-    "\nSaved to:"
+    day_counts
+)
+
+
+# =========================================================
+# SAVE CONFIRMATION
+# =========================================================
+
+print("\n")
+print("=" * 70)
+
+print(
+    "Saved to:"
 )
 
 print(
     OUTPUT_FILE
 )
 
-print(
-    "\nGFS multi-day loading completed successfully!"
-)
+print("=" * 70)
+
+
+# =========================================================
+# IMPORTANT VALIDATION MESSAGE
+# =========================================================
+
+missing_days = [
+
+    day
+
+    for day in range(
+        1,
+        11
+    )
+
+    if day not in available_days
+
+]
+
+
+if len(missing_days) > 0:
+
+    print("\n")
+    print("=" * 70)
+    print("WARNING")
+    print("=" * 70)
+
+    print(
+        "The loader supports Day 1-Day 10,"
+        " but the downloaded GRIB files do not"
+        " contain all ten forecast days."
+    )
+
+    print(
+        "\nMissing days:",
+        missing_days
+    )
+
+    print(
+        "\nDO NOT claim these days are validated"
+        " until corresponding forecast data is available."
+    )
+
+else:
+
+    print("\n")
+    print("=" * 70)
+    print("DAY 1-DAY 10 DATA AVAILABLE")
+    print("=" * 70)
+
+    print(
+        "All ten forecast days are present."
+    )
+
+
+print("\nGFS processing completed successfully!")
