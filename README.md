@@ -4,6 +4,9 @@
 
 The system combines **GFS forecast data**, **ERA5 observations**, feature engineering, machine learning, and a **Forecast Bust Detection** framework to generate corrected weather predictions and classify forecast reliability.
 
+# Demo working prototype of VARUNA
+https://drive.google.com/file/d/1k2SH05nmXf9UFjFA7HBrpyaUkqJdxmCx/view?usp=drive_link
+
 ---
 
 ## 🎯 Objectives
