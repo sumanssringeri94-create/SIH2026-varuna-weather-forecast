@@ -4,6 +4,9 @@ import plotly.express as px
 from pathlib import Path
 
 
+px.defaults.template = "plotly_white"
+
+
 # ============================================================
 # PAGE CONFIGURATION
 # ============================================================
@@ -23,98 +26,212 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-        .main {
-            background-color: #0e1117;
+        :root {
+            --background: #f3f4f6;
+            --surface: #ffffff;
+            --text-primary: #111827;
+            --text-secondary: #374151;
+            --text-muted: #6b7280;
+            --text-on-dark: #ffffff;
+            --sidebar-background: #294258;
+            --border: #d9dee5;
+            --primary: #2f86b9;
+        }
+
+        .stApp,
+        [data-testid="stAppViewContainer"],
+        [data-testid="stMainBlockContainer"] {
+            background-color: var(--background);
+            color: var(--text-primary);
+        }
+
+        [data-testid="stHeader"] {
+            background-color: var(--background);
+        }
+
+        [data-testid="stSidebar"] {
+            background-color: var(--sidebar-background);
+            border-right: 1px solid #20384b;
+        }
+
+        [data-testid="stSidebar"] * {
+            color: #f8fafc;
+        }
+
+        [data-testid="stSidebar"] hr {
+            border-color: #587086;
+        }
+
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+            color: #cbd5e1;
+        }
+
+        [data-testid="stSidebar"] [data-baseweb="select"] {
+            background-color: #ffffff;
+        }
+
+        [data-testid="stSidebar"] [data-baseweb="select"] * {
+            color: var(--text-primary);
         }
 
         .block-container {
-            padding-top: 1.8rem;
+            padding-top: 2rem;
             padding-bottom: 2rem;
             max-width: 1350px;
         }
 
         .brand {
-            font-size: 3.2rem;
-            font-weight: 750;
-            letter-spacing: 0.04em;
+            color: var(--text-primary);
+            font-size: 2.25rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
             margin-bottom: 0.1rem;
         }
 
         .tagline {
-            color: #aeb4c0;
+            color: var(--text-secondary);
             font-size: 1.05rem;
+            font-weight: 500;
             margin-bottom: 1.2rem;
         }
 
         .pipeline {
-            background: #151922;
-            border: 1px solid #2a303b;
-            border-radius: 10px;
+            background: #dceeff;
+            border: 1px solid #b9d7ee;
+            border-radius: 6px;
             padding: 14px 18px;
-            color: #d9dde5;
-            font-size: 0.98rem;
+            color: #1e3a5f;
+            font-size: 1rem;
             margin: 1rem 0 1.5rem 0;
         }
 
         .status {
             display: inline-block;
             padding: 5px 10px;
-            border-radius: 999px;
-            background: #173d2b;
-            color: #67d39b;
-            border: 1px solid #285d43;
-            font-size: 0.82rem;
+            border-radius: 6px;
+            background: #dcfce7;
+            color: #166534;
+            border: 1px solid #86efac;
+            font-size: 0.875rem;
             font-weight: 600;
         }
 
         .section-divider {
-            margin: 28px 0;
-            border-top: 1px solid #2b3039;
+            margin: 30px 0;
+            border-top: 1px solid var(--border);
         }
 
         [data-testid="stMetric"] {
-            background: #151922;
-            border: 1px solid #292f39;
-            border-radius: 10px;
-            padding: 12px 14px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 14px 16px;
+            box-shadow: none;
         }
 
         [data-testid="stMetricLabel"] {
-            color: #aeb4c0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            font-weight: 600;
         }
 
         [data-testid="stMetricValue"] {
-            font-weight: 650;
+            color: var(--text-primary);
+            font-size: 1.8rem;
+            font-weight: 700;
+        }
+
+        [data-testid="stMetricDelta"] {
+            color: var(--text-muted);
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--text-primary);
+            letter-spacing: 0;
+        }
+
+        h1 {
+            font-size: 2rem;
+        }
+
+        h2, h3 {
+            font-size: 1.25rem;
+        }
+
+        p, li, label {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            line-height: 1.55;
+        }
+
+        [data-testid="stCaptionContainer"] {
+            color: var(--text-muted);
+        }
+
+        [data-baseweb="select"],
+        [data-baseweb="input"],
+        [data-testid="stTextInput"] input {
+            background-color: var(--surface);
+            color: var(--text-primary);
+            border-color: var(--border);
+        }
+
+        [data-baseweb="select"] * {
+            color: var(--text-primary);
+        }
+
+        [data-testid="stDataFrame"] {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface);
+        }
+
+        [data-testid="stExpander"] {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface);
+        }
+
+        [data-testid="stExpander"] summary {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        button[kind="primary"] {
+            background-color: var(--primary);
+            color: var(--text-on-dark);
         }
 
         .sidebar-brand {
-            font-size: 1.55rem;
+            color: #ffffff;
+            font-size: 1.6rem;
             font-weight: 700;
             margin-bottom: 0.2rem;
         }
 
         .sidebar-note {
-            color: #9da4b0;
-            font-size: 0.88rem;
+            color: #cbd5e1;
+            font-size: 0.92rem;
             line-height: 1.5;
         }
 
         .alert-box {
             padding: 14px 16px;
-            border-radius: 9px;
+            border-radius: 6px;
             margin: 8px 0 18px 0;
         }
 
         .alert-critical {
-            background: #3b1c22;
-            border: 1px solid #74323f;
-            color: #ffb3be;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
         }
 
         .alert-normal {
-            background: #153325;
-            border: 1px solid #285a41;
-            color: #72d7a0;
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            color: #166534;
         }
 
         footer {
